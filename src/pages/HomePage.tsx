@@ -13,7 +13,7 @@ export default function HomePage() {
   const [stats, setStats] = useState({ 
     todayEarnings: 0, 
     totalInvites: 0,
-    allTimeEarnings: 0 // Nova stat para o ganho total
+    allTimeEarnings: 0
   });
   const [loading, setLoading] = useState(true);
 
@@ -36,42 +36,41 @@ export default function HomePage() {
       today.setHours(0, 0, 0, 0);
       const startOfToday = Timestamp.fromDate(today);
 
-      // 3. Buscar TODAS as transações de ganho (sem filtro de data inicialmente)
-      // Tipos: commission, roulette, investment, checkin
-      const transactionsRef = collection(db, 'users', userId, 'transactions');
-      const qAllTransactions = query(transactionsRef);
-      const querySnapshot = await getDocs(qAllTransactions);
+      // 3. Buscar TODAS as transações do usuário (CORRIGIDO PARA SUBCOLEÇÃO)
+      const qEarn = query(collection(db, 'users', userId, 'transactions'));
+      const earnSnap = await getDocs(qEarn);
 
-      let todayTotal = 0;
-      let allTimeTotal = 0;
-      
-      const earningTypes = ['commission', 'roulette', 'investment', 'checkin'];
+      let sumToday = 0;
+      let sumAllTime = 0;
 
-      querySnapshot.forEach((doc) => {
+      // LISTA DE GANHOS
+      const tiposDeGanho = ['commission', 'roulette', 'daily_yield', 'checkin'];
+
+      earnSnap.forEach(doc => {
         const data = doc.data();
-        const amount = Number(data.amount || 0);
-        const type = data.type;
-        const createdAt = data.createdAt;
+        const val = Number(data.amount) || 0;
+        
+        // Se a transação for um dos tipos de ganho definidos acima
+        if (tiposDeGanho.includes(data.type)) {
+          
+          // Somar TUDO (Ganho Geral / All Time)
+          sumAllTime += val;
 
-        // Se o tipo da transação for um tipo de ganho
-        if (earningTypes.includes(type)) {
-          // Soma no Total Geral
-          allTimeTotal += amount;
-
-          // Se for de hoje, soma no Hoje
-          if (createdAt && createdAt.seconds >= startOfToday.seconds) {
-            todayTotal += amount;
+          // Somar apenas hoje (Ganhos de Hoje)
+          if (data.createdAt && data.createdAt.toMillis() >= startOfToday.toMillis()) {
+            sumToday += val;
           }
         }
       });
 
       setStats({
-        todayEarnings: todayTotal,
+        todayEarnings: sumToday,
         totalInvites: teamSnap.size,
-        allTimeEarnings: allTimeTotal
+        allTimeEarnings: sumAllTime
       });
-    } catch (err) {
-      console.error("Erro ao buscar estatísticas:", err);
+
+    } catch (error) {
+      console.error("Erro ao buscar stats:", error);
     } finally {
       setLoading(false);
     }
@@ -81,7 +80,6 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6 pb-6 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-gray-400 text-sm">Bem-vindo de volta</p>
@@ -92,7 +90,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Stats Cards: Ganhos Hoje e Equipe */}
       <div className="grid grid-cols-2 gap-3">
         <Card className="bg-[#111111]/80 border-[#1a1a1a]">
           <CardContent className="pt-4">
@@ -117,7 +114,6 @@ export default function HomePage() {
         </Card>
       </div>
 
-      {/* Main Balance Card */}
       <Card className="bg-[#111111]/80 border-[#22c55e]/30 shadow-lg shadow-[#22c55e]/5">
         <CardContent className="pt-5 pb-5">
           <div className="flex items-center gap-2 mb-2 text-gray-400 text-sm">
@@ -135,7 +131,6 @@ export default function HomePage() {
         </CardContent>
       </Card>
 
-      {/* Widgets */}
       <Card className="bg-[#111111]/80 border-[#1a1a1a]">
         <CardContent className="pt-6">
           <CheckIn onCheckInComplete={() => fetchHomeStats(user.id)} />
