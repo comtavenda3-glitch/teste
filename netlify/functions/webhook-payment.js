@@ -1,5 +1,5 @@
 // ========================================
-// NETLIFY FUNCTION: Webhook Pagamentos Final (CORRIGIDO)
+// NETLIFY FUNCTION: Webhook Pagamentos Final (COM LÓGICA DE GIROS)
 // ========================================
 const admin = require('firebase-admin');
 
@@ -21,17 +21,14 @@ exports.handler = async (event) => {
   try {
     const body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
     
-    // 1. Identificar a Transação
     const transactionId = body.reference || body.id || (event.queryStringParameters ? event.queryStringParameters.id : null);
     if (!transactionId) return { statusCode: 400, body: JSON.stringify({ error: 'ID ausente' }) };
 
-    // 2. Verificar Status de Pagamento
     const statusCeto = String(body.status).toUpperCase();
     const isPaid = statusCeto === 'PAID' || statusCeto === 'COMPLETED' || body.success === true;
 
     if (!isPaid) return { statusCode: 200, body: JSON.stringify({ message: 'Aguardando pagamento' }) };
 
-    // 3. Buscar Depósito Global
     const depositRef = db.collection('deposits').doc(transactionId);
     const depositDoc = await depositRef.get();
     
@@ -46,11 +43,7 @@ exports.handler = async (event) => {
     const parsedAmount = parseFloat(amount);
     const userRef = db.collection('users').doc(userId);
 
-    // ==========================================
-    // TRANSAÇÃO ATÔMICA
-    // ==========================================
     await db.runTransaction(async (transaction) => {
-      
       const userSnap = await transaction.get(userRef);
       if (!userSnap.exists) throw new Error("Usuário não existe");
       const userData = userSnap.data();
@@ -79,33 +72,35 @@ exports.handler = async (event) => {
         paidAt: admin.firestore.FieldValue.serverTimestamp() 
       });
 
-      // B) Atualizar Saldo do Usuário
+      // B) Atualizar Saldo do Usuário + GANHAR GIRO POR DEPOSITAR
       transaction.update(userRef, {
         balance: admin.firestore.FieldValue.increment(parsedAmount),
-        totalDeposited: admin.firestore.FieldValue.increment(parsedAmount)
+        totalDeposited: admin.firestore.FieldValue.increment(parsedAmount),
+        spinsAvailable: admin.firestore.FieldValue.increment(1) // <--- O USUÁRIO GANHA 1 GIRO
       });
 
       // C) Histórico do Depósito
       const userTransRef = userRef.collection('transactions').doc(transactionId);
       transaction.set(userTransRef, {
         status: 'completed',
-        description: 'Depósito via PIX (Confirmado)',
+        description: 'Depósito via PIX (Confirmado + 1 Giro)',
         paidAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
       // D) Comissões
       
-      // Nível 1 (20%)
+      // Nível 1 (20%) + GANHAR GIRO POR INDICAÇÃO
       if (ref1Snap?.exists) {
         const bonus1 = parsedAmount * 0.20;
         transaction.update(ref1Ref, {
           balance: admin.firestore.FieldValue.increment(bonus1),
-          totalCommissions: admin.firestore.FieldValue.increment(bonus1)
+          totalCommissions: admin.firestore.FieldValue.increment(bonus1),
+          spinsAvailable: admin.firestore.FieldValue.increment(1) // <--- O PADRINHO GANHA 1 GIRO
         });
         transaction.set(ref1Ref.collection('transactions').doc(`bonus1_${transactionId}`), {
           amount: bonus1, status: 'completed', type: 'commission',
-          level: 1, // <--- ADICIONADO AQUI
-          description: `Indicação Nível 1: ${userName || 'Usuário'}`,
+          level: 1,
+          description: `Indicação Nível 1: ${userName || 'Usuário'} (+1 Giro)`,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
       }
@@ -119,7 +114,7 @@ exports.handler = async (event) => {
         });
         transaction.set(ref2Ref.collection('transactions').doc(`bonus2_${transactionId}`), {
           amount: bonus2, status: 'completed', type: 'commission',
-          level: 2, // <--- ADICIONADO AQUI
+          level: 2,
           description: `Indicação Nível 2: ${userName || 'Usuário'}`,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
@@ -134,7 +129,7 @@ exports.handler = async (event) => {
         });
         transaction.set(ref3Ref.collection('transactions').doc(`bonus3_${transactionId}`), {
           amount: bonus3, status: 'completed', type: 'commission',
-          level: 3, // <--- ADICIONADO AQUI
+          level: 3,
           description: `Indicação Nível 3: ${userName || 'Usuário'}`,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
