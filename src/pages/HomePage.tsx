@@ -6,7 +6,7 @@ import Roulette from '../components/Roulette';
 import { TrendingUp, Users, Wallet, Loader2 } from 'lucide-react';
 
 import { db } from "../firebase/firebase"; 
-import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
 
 export default function HomePage() {
   const { user } = useAuth();
@@ -17,44 +17,33 @@ export default function HomePage() {
   });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (user?.id) {
-      fetchHomeStats(user.id);
-    }
-  }, [user?.id]);
-
+  // Função para buscar dados atualizados
   const fetchHomeStats = async (userId: string) => {
     try {
       setLoading(true);
       
-      // 1. Total de Convidados (Equipe)
+      // 1. Pegar o Total Geral direto do documento do usuário (Onde está o valor de 6059)
+      const userDocRef = doc(db, 'users', userId);
+      const userSnap = await getDoc(userDocRef);
+      const userData = userSnap.data();
+
+      // 2. Total de Convidados
       const qTeam = query(collection(db, 'users'), where('referredBy', '==', userId));
       const teamSnap = await getDocs(qTeam);
       
-      // 2. Configuração de Datas para "Hoje" (Início do dia às 00:00)
+      // 3. Configuração de Datas para "Hoje"
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const startOfToday = Timestamp.fromDate(today);
 
-      // 3. Buscar TODAS as transações do usuário
+      // 4. Buscar Transações para calcular apenas o ganho de HOJE
       const transactionsRef = collection(db, 'users', userId, 'transactions');
       const querySnapshot = await getDocs(transactionsRef);
 
       let todayTotal = 0;
-      let allTimeTotal = 0;
       
-      // Tipos que devem ser somados como ganhos
-      // Adicionei variações comuns para garantir que pegue tudo
-      const earningTypes = [
-        'commission', 
-        'roulette', 
-        'investment', 
-        'checkin', 
-        'daily_return', 
-        'bonus', 
-        'profit',
-        'referral'
-      ];
+      // Tipos que o seu sistema usa (incluindo 'roulette' do seu hook)
+      const earningTypes = ['commission', 'roulette', 'investment', 'checkin', 'daily_return'];
 
       querySnapshot.forEach((doc) => {
         const data = doc.data();
@@ -62,12 +51,8 @@ export default function HomePage() {
         const type = data.type;
         const createdAt = data.createdAt;
 
-        // Verifica se é um tipo de ganho (ignora saques/withdrawals e depósitos)
         if (earningTypes.includes(type) && amount > 0) {
-          // Soma no Total Geral (Sempre)
-          allTimeTotal += amount;
-
-          // Soma no Hoje (Se a data for de hoje)
+          // Soma apenas se for de hoje
           if (createdAt && createdAt.seconds >= startOfToday.seconds) {
             todayTotal += amount;
           }
@@ -77,7 +62,8 @@ export default function HomePage() {
       setStats({
         todayEarnings: todayTotal,
         totalInvites: teamSnap.size,
-        allTimeEarnings: allTimeTotal
+        // Pega o valor real acumulado no banco de dados
+        allTimeEarnings: Number(userData?.totalEarned || 0)
       });
     } catch (err) {
       console.error("Erro ao buscar estatísticas:", err);
@@ -85,6 +71,12 @@ export default function HomePage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchHomeStats(user.id);
+    }
+  }, [user?.id]);
 
   if (!user) return <div className="h-screen bg-black flex items-center justify-center"><Loader2 className="animate-spin text-[#22c55e]"/></div>;
 
@@ -101,7 +93,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Stats Cards: Ganhos Hoje e Equipe */}
       <div className="grid grid-cols-2 gap-3">
         <Card className="bg-[#111111]/80 border-[#1a1a1a]">
           <CardContent className="pt-4">
@@ -126,7 +117,6 @@ export default function HomePage() {
         </Card>
       </div>
 
-      {/* Main Balance Card */}
       <Card className="bg-[#111111]/80 border-[#22c55e]/30 shadow-lg shadow-[#22c55e]/5">
         <CardContent className="pt-5 pb-5">
           <div className="flex items-center gap-2 mb-2 text-gray-400 text-sm">
@@ -144,14 +134,16 @@ export default function HomePage() {
         </CardContent>
       </Card>
 
-      {/* Widgets */}
       <Card className="bg-[#111111]/80 border-[#1a1a1a]">
         <CardContent className="pt-6">
           <CheckIn onCheckInComplete={() => fetchHomeStats(user.id)} />
         </CardContent>
       </Card>
 
-      <Roulette onSpinComplete={() => fetchHomeStats(user.id)} />
+      <Roulette onSpinComplete={() => {
+        // Delay para o Firebase terminar de gravar antes de lermos
+        setTimeout(() => fetchHomeStats(user.id), 1500);
+      }} />
     </div>
   );
 }
