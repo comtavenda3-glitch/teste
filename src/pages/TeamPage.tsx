@@ -36,6 +36,8 @@ export default function TeamPage() {
 
   const inviteLink = `${window.location.origin}/?code=${user?.inviteCode}`;
 
+  // Alterado para depender apenas do user?.id para evitar loops de leitura no Firebase
+  // quando o saldo (totalCommissions) for atualizado em tempo real pelo AuthContext
   useEffect(() => {
     const userId = user?.id; 
     
@@ -44,14 +46,14 @@ export default function TeamPage() {
     } else if (user === null) {
       setLoading(false);
     }
-  }, [user]);
+  }, [user?.id]);
 
   const fetchRealTeamData = async (userId: string) => {
     setLoading(true);
     try {
       const usersRef = collection(db, 'users');
       
-      // --- 1. BUSCAR TRANSAÇÕES DE COMISSÃO (VALOR REAL) ---
+      // --- 1. BUSCAR TRANSAÇÕES DE COMISSÃO (Níveis de ganhos detalhados) ---
       const transRef = collection(db, 'users', userId, 'transactions');
       const qTrans = query(transRef, where('type', '==', 'commission'));
       const transSnap = await getDocs(qTrans);
@@ -60,7 +62,7 @@ export default function TeamPage() {
       
       transSnap.forEach(doc => {
         const data = doc.data();
-        const level = data.level || 1; // Se a transação não tiver nível, assume nível 1
+        const level = data.level || 1;
         if (level >= 1 && level <= 3) {
           earningsByLevel[level as 1|2|3] += Number(data.amount) || 0;
         }
@@ -77,7 +79,6 @@ export default function TeamPage() {
       let l2Docs: any[] = [];
       let l2Ids: string[] = [];
       if (l1Ids.length > 0) {
-        // Divide em blocos de 30 para respeitar o limite do Firestore na cláusula 'in'
         const chunks = [];
         for (let i = 0; i < l1Ids.length; i += 30) {
           chunks.push(l1Ids.slice(i, i + 30));
@@ -105,7 +106,6 @@ export default function TeamPage() {
         l3Docs = snap3Array.flatMap(snap => snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
 
-      // Função auxiliar para padronizar os dados de exibição
       const formatMembers = (docs: any[]): TeamMember[] => {
         return docs.map(d => ({
           id: d.id,
@@ -115,7 +115,6 @@ export default function TeamPage() {
         }));
       };
 
-      // Atualiza o estado com os ganhos reais calculados pelas transações
       setTeamData({
         level1: { count: l1Docs.length, totalEarned: earningsByLevel[1], members: formatMembers(l1Docs) },
         level2: { count: l2Docs.length, totalEarned: earningsByLevel[2], members: formatMembers(l2Docs) },
@@ -161,10 +160,9 @@ export default function TeamPage() {
   }
 
   const currentLevel = teamData[`level${activeLevel}` as keyof TeamData];
-  const percentage = activeLevel === 1 ? 20 : activeLevel === 2 ? 5 : 1;
   const totalReferrals = teamData.level1.count + teamData.level2.count + teamData.level3.count;
   
-  // CORREÇÃO PRINCIPAL: Pegando o valor real do campo 'totalCommissions' do Firestore
+  // Pegando o valor exato e em tempo real mapeado no Contexto
   const totalEarnings = user?.totalCommissions || 0;
 
   return (
@@ -196,6 +194,7 @@ export default function TeamPage() {
               </div>
               <span className="text-gray-400 text-sm">Comissões</span>
             </div>
+            {/* Exibe o valor formatado */}
             <p className="text-2xl font-bold text-[#22c55e]">R$ {totalEarnings.toFixed(2)}</p>
           </CardContent>
         </Card>
@@ -299,7 +298,6 @@ export default function TeamPage() {
           <CardTitle className="text-white">Meus Convidados</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* Abas de Níveis */}
           <div className="grid grid-cols-3 gap-2 mb-4">
             {[1, 2, 3].map((level) => {
               const levelData = teamData[`level${level}` as keyof TeamData];
@@ -317,14 +315,11 @@ export default function TeamPage() {
                   <span className="text-xs opacity-80 font-normal">
                     {levelData?.count || 0} usuários
                   </span>
-                  {/* Se quiser mostrar quanto rendeu cada nível de forma isolada, descomente abaixo */}
-                  {/* <span className="text-xs opacity-90 font-bold mt-1">R$ {levelData?.totalEarned.toFixed(2)}</span> */}
                 </button>
               );
             })}
           </div>
 
-          {/* Lista de Membros */}
           <div className="overflow-hidden" key={activeLevel}>
             {currentLevel && currentLevel.members.length > 0 ? (
               <div className="space-y-2 max-h-64 overflow-y-auto animate-slide-up">
@@ -337,7 +332,7 @@ export default function TeamPage() {
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-[#22c55e]/20 rounded-full flex items-center justify-center">
                         <span className="text-[#22c55e] font-bold text-sm">
-                          {member.email !== 'Usuário Oculto' && member.email !== 'Sem E-mail' ? member.email[0].toUpperCase() : '?'}
+                          {member.email && member.email !== 'Usuário Oculto' && member.email !== 'Sem E-mail' ? member.email[0].toUpperCase() : '?'}
                         </span>
                       </div>
                       <div>
