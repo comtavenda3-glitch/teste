@@ -49,19 +49,23 @@ export default function HomePage() {
   const [stats, setStats] = useState({ 
     todayEarnings: 0, 
     totalInvites: 0,
-    allTimeEarnings: 0 
+    allTimeEarnings: 0,
+    currentBalance: 0 // Nova stat para pegar direto do banco
   });
   const [loading, setLoading] = useState(true);
 
   const fetchHomeStats = async (userId: string) => {
     try {
+      // 1. Busca os dados mais recentes do usuário diretamente no Firestore
       const userDocRef = doc(db, 'users', userId);
       const userSnap = await getDoc(userDocRef);
       const userData = userSnap.data();
 
+      // 2. Total de Convidados
       const qTeam = query(collection(db, 'users'), where('referredBy', '==', userId));
       const teamSnap = await getDocs(qTeam);
       
+      // 3. Cálculo de Ganhos de Hoje
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const startOfToday = Timestamp.fromDate(today);
@@ -70,6 +74,7 @@ export default function HomePage() {
       const querySnapshot = await getDocs(transactionsRef);
 
       let todayTotal = 0;
+      // Garanta que os nomes aqui batem exatamente com o 'type' salvo pelas suas funções
       const earningTypes = ['commission', 'roulette', 'investment', 'checkin', 'daily_return'];
 
       querySnapshot.forEach((doc) => {
@@ -85,10 +90,12 @@ export default function HomePage() {
         }
       });
 
+      // Atualiza todos os valores com base no banco
       setStats({
         todayEarnings: todayTotal,
         totalInvites: teamSnap.size,
-        allTimeEarnings: Number(userData?.totalEarned || 0) // Valor real do banco
+        allTimeEarnings: Number(userData?.totalEarned || 0),
+        currentBalance: Number(userData?.balance || 0) // Usa o saldo do banco, não do contexto
       });
     } catch (err) {
       console.error("Erro ao buscar estatísticas:", err);
@@ -99,6 +106,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (user?.id) {
+      // Primeira busca assim que entra
       fetchHomeStats(user.id);
     }
   }, [user?.id]);
@@ -149,7 +157,8 @@ export default function HomePage() {
             <Wallet className="w-5 h-5 text-[#22c55e]" /> Saldo Disponível
           </div>
           <p className="text-3xl font-extrabold text-white mb-3">
-            <AnimatedNumber value={Number(user.balance || 0)} />
+            {/* Agora ele usa o currentBalance lido direto do banco */}
+            <AnimatedNumber value={stats.currentBalance} />
           </p>
           <div className="pt-3 border-t border-[#1a1a1a] flex justify-between text-sm">
             <span className="text-gray-500">Total Ganhos (Geral)</span>
@@ -167,8 +176,8 @@ export default function HomePage() {
       </Card>
 
       <Roulette onSpinComplete={() => {
-        // O delay aqui permite que o contador suba de forma suave após o prêmio cair no banco
-        setTimeout(() => fetchHomeStats(user.id), 1200);
+        // Delay de 1.5s garante que os dados já foram gravados no Firebase
+        setTimeout(() => fetchHomeStats(user.id), 1500);
       }} />
     </div>
   );
