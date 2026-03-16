@@ -211,7 +211,8 @@
 
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js';
-    import { getAuth, signInWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
+    // IMPORTANTE: Adicionado o signOut aqui na importação
+    import { getAuth, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js';
     import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
 
     const firebaseConfig = {
@@ -227,6 +228,15 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
 
+    // ==========================================
+    // LIMPEZA FORÇADA DE SESSÃO
+    // Isto garante que a página nunca o redireciona usando dados de um utilizador normal
+    // ==========================================
+    localStorage.removeItem('adminAuth');
+    signOut(auth).catch((error) => {
+        console.error("Erro ao limpar sessão antiga:", error);
+    });
+
     const form = document.getElementById('loginForm');
     const emailInput = document.getElementById('email');
     const passwordInput = document.getElementById('password');
@@ -235,11 +245,7 @@
     const buttonText = document.getElementById('buttonText');
     const loading = document.getElementById('loading');
 
-    // Verificar se já está logado
-    const adminAuth = localStorage.getItem('adminAuth');
-    if (adminAuth) {
-      window.location.href = 'dashboard.html';
-    }
+    // Nota: O bloco que redirecionava automaticamente foi apagado propositadamente.
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -255,21 +261,25 @@
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
 
-        // Verificar se é admin
+        // Verificar se é admin no Firestore
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (!userDoc.exists() || userDoc.data().role !== 'admin') {
-          throw new Error('Acesso negado. Você não é um administrador.');
+          // Se não for admin, faz logout imediatamente e lança erro
+          await signOut(auth);
+          throw new Error('Acesso negado. Não é um administrador.');
         }
 
+        // Se passar, guarda a sessão
         localStorage.setItem('adminAuth', JSON.stringify({ 
           email: user.email, 
           uid: user.uid 
         }));
         
+        // Redireciona para o painel
         window.location.href = 'dashboard.html';
       } catch (error) {
         console.error('Login error:', error);
-        errorDiv.textContent = error.message || 'Email ou senha incorretos';
+        errorDiv.textContent = error.message || 'Email ou palavra-passe incorretos';
         errorDiv.style.display = 'block';
         loginBtn.disabled = false;
         buttonText.style.display = 'inline';
