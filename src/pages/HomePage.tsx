@@ -13,7 +13,7 @@ export default function HomePage() {
   const [stats, setStats] = useState({ 
     todayEarnings: 0, 
     totalInvites: 0,
-    allTimeEarnings: 0
+    allTimeEarnings: 0 
   });
   const [loading, setLoading] = useState(true);
 
@@ -31,46 +31,56 @@ export default function HomePage() {
       const qTeam = query(collection(db, 'users'), where('referredBy', '==', userId));
       const teamSnap = await getDocs(qTeam);
       
-      // 2. Configuração de Datas para "Hoje"
+      // 2. Configuração de Datas para "Hoje" (Início do dia às 00:00)
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const startOfToday = Timestamp.fromDate(today);
 
-      // 3. Buscar TODAS as transações do usuário (CORRIGIDO PARA SUBCOLEÇÃO)
-      const qEarn = query(collection(db, 'users', userId, 'transactions'));
-      const earnSnap = await getDocs(qEarn);
+      // 3. Buscar TODAS as transações do usuário
+      const transactionsRef = collection(db, 'users', userId, 'transactions');
+      const querySnapshot = await getDocs(transactionsRef);
 
-      let sumToday = 0;
-      let sumAllTime = 0;
+      let todayTotal = 0;
+      let allTimeTotal = 0;
+      
+      // Tipos que devem ser somados como ganhos
+      // Adicionei variações comuns para garantir que pegue tudo
+      const earningTypes = [
+        'commission', 
+        'roulette', 
+        'investment', 
+        'checkin', 
+        'daily_return', 
+        'bonus', 
+        'profit',
+        'referral'
+      ];
 
-      // LISTA DE GANHOS
-      const tiposDeGanho = ['commission', 'roulette', 'daily_yield', 'checkin'];
-
-      earnSnap.forEach(doc => {
+      querySnapshot.forEach((doc) => {
         const data = doc.data();
-        const val = Number(data.amount) || 0;
-        
-        // Se a transação for um dos tipos de ganho definidos acima
-        if (tiposDeGanho.includes(data.type)) {
-          
-          // Somar TUDO (Ganho Geral / All Time)
-          sumAllTime += val;
+        const amount = Number(data.amount || 0);
+        const type = data.type;
+        const createdAt = data.createdAt;
 
-          // Somar apenas hoje (Ganhos de Hoje)
-          if (data.createdAt && data.createdAt.toMillis() >= startOfToday.toMillis()) {
-            sumToday += val;
+        // Verifica se é um tipo de ganho (ignora saques/withdrawals e depósitos)
+        if (earningTypes.includes(type) && amount > 0) {
+          // Soma no Total Geral (Sempre)
+          allTimeTotal += amount;
+
+          // Soma no Hoje (Se a data for de hoje)
+          if (createdAt && createdAt.seconds >= startOfToday.seconds) {
+            todayTotal += amount;
           }
         }
       });
 
       setStats({
-        todayEarnings: sumToday,
+        todayEarnings: todayTotal,
         totalInvites: teamSnap.size,
-        allTimeEarnings: sumAllTime
+        allTimeEarnings: allTimeTotal
       });
-
-    } catch (error) {
-      console.error("Erro ao buscar stats:", error);
+    } catch (err) {
+      console.error("Erro ao buscar estatísticas:", err);
     } finally {
       setLoading(false);
     }
@@ -80,6 +90,7 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6 pb-6 animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-gray-400 text-sm">Bem-vindo de volta</p>
@@ -90,6 +101,7 @@ export default function HomePage() {
         </div>
       </div>
 
+      {/* Stats Cards: Ganhos Hoje e Equipe */}
       <div className="grid grid-cols-2 gap-3">
         <Card className="bg-[#111111]/80 border-[#1a1a1a]">
           <CardContent className="pt-4">
@@ -114,6 +126,7 @@ export default function HomePage() {
         </Card>
       </div>
 
+      {/* Main Balance Card */}
       <Card className="bg-[#111111]/80 border-[#22c55e]/30 shadow-lg shadow-[#22c55e]/5">
         <CardContent className="pt-5 pb-5">
           <div className="flex items-center gap-2 mb-2 text-gray-400 text-sm">
@@ -131,6 +144,7 @@ export default function HomePage() {
         </CardContent>
       </Card>
 
+      {/* Widgets */}
       <Card className="bg-[#111111]/80 border-[#1a1a1a]">
         <CardContent className="pt-6">
           <CheckIn onCheckInComplete={() => fetchHomeStats(user.id)} />
