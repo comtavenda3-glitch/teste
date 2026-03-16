@@ -8,7 +8,7 @@ import { TrendingUp, Users, Wallet, Loader2 } from 'lucide-react';
 import { db } from "../firebase/firebase"; 
 import { collection, query, where, getDocs, Timestamp, doc, getDoc } from 'firebase/firestore';
 
-// Componente para a animação de contagem
+// Componente para a animação de contagem fluida
 const AnimatedNumber = ({ value }: { value: number }) => {
   const [displayValue, setDisplayValue] = useState(value);
   const previousValue = useRef(value);
@@ -18,14 +18,12 @@ const AnimatedNumber = ({ value }: { value: number }) => {
     const end = value;
     if (start === end) return;
 
-    const duration = 1000; // 1 segundo de animação
+    const duration = 1000; 
     const startTime = performance.now();
 
     const updateNumber = (currentTime: number) => {
       const elapsed = currentTime - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      
-      // Efeito de desaceleração (ease-out)
       const easeOut = 1 - Math.pow(1 - progress, 3);
       const current = start + (end - start) * easeOut;
       
@@ -39,6 +37,7 @@ const AnimatedNumber = ({ value }: { value: number }) => {
     };
 
     requestAnimationFrame(updateNumber);
+    previousValue.current = end;
   }, [value]);
 
   return <span>R$ {displayValue.toFixed(2)}</span>;
@@ -50,22 +49,22 @@ export default function HomePage() {
     todayEarnings: 0, 
     totalInvites: 0,
     allTimeEarnings: 0,
-    currentBalance: 0 // Nova stat para pegar direto do banco
+    currentBalance: 0
   });
   const [loading, setLoading] = useState(true);
 
   const fetchHomeStats = async (userId: string) => {
     try {
-      // 1. Busca os dados mais recentes do usuário diretamente no Firestore
+      // 1. Busca Direta no Documento do Usuário (Evita que o Geral fique zerado)
       const userDocRef = doc(db, 'users', userId);
       const userSnap = await getDoc(userDocRef);
       const userData = userSnap.data();
 
-      // 2. Total de Convidados
+      // 2. Busca de Equipe
       const qTeam = query(collection(db, 'users'), where('referredBy', '==', userId));
       const teamSnap = await getDocs(qTeam);
       
-      // 3. Cálculo de Ganhos de Hoje
+      // 3. Cálculo de Ganhos de Hoje via Transações
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const startOfToday = Timestamp.fromDate(today);
@@ -74,7 +73,7 @@ export default function HomePage() {
       const querySnapshot = await getDocs(transactionsRef);
 
       let todayTotal = 0;
-      // Garanta que os nomes aqui batem exatamente com o 'type' salvo pelas suas funções
+      // 'roulette' incluído para somar nos ganhos diários
       const earningTypes = ['commission', 'roulette', 'investment', 'checkin', 'daily_return'];
 
       querySnapshot.forEach((doc) => {
@@ -90,12 +89,11 @@ export default function HomePage() {
         }
       });
 
-      // Atualiza todos os valores com base no banco
       setStats({
         todayEarnings: todayTotal,
         totalInvites: teamSnap.size,
-        allTimeEarnings: Number(userData?.totalEarned || 0),
-        currentBalance: Number(userData?.balance || 0) // Usa o saldo do banco, não do contexto
+        allTimeEarnings: Number(userData?.totalEarned || 0), // Pega o valor real (Ex: 6059) do banco
+        currentBalance: Number(userData?.balance || 0)     // Saldo atualizado direto do banco
       });
     } catch (err) {
       console.error("Erro ao buscar estatísticas:", err);
@@ -106,7 +104,6 @@ export default function HomePage() {
 
   useEffect(() => {
     if (user?.id) {
-      // Primeira busca assim que entra
       fetchHomeStats(user.id);
     }
   }, [user?.id]);
@@ -115,14 +112,13 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6 pb-6 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-gray-400 text-sm">Bem-vindo de volta</p>
           <h1 className="text-xl font-bold text-white">{user.email?.split('@')[0]}</h1>
         </div>
-        <div className="w-12 h-12 bg-gradient-to-br from-[#22c55e] to-[#16a34a] rounded-full flex items-center justify-center">
-          <span className="text-xl font-bold text-white">{user.email?.charAt(0).toUpperCase()}</span>
+        <div className="w-12 h-12 bg-gradient-to-br from-[#22c55e] to-[#16a34a] rounded-full flex items-center justify-center text-white font-bold">
+          {user.email?.charAt(0).toUpperCase()}
         </div>
       </div>
 
@@ -150,14 +146,12 @@ export default function HomePage() {
         </Card>
       </div>
 
-      {/* Main Balance Card */}
       <Card className="bg-[#111111]/80 border-[#22c55e]/30 shadow-lg shadow-[#22c55e]/5">
         <CardContent className="pt-5 pb-5">
           <div className="flex items-center gap-2 mb-2 text-gray-400 text-sm">
             <Wallet className="w-5 h-5 text-[#22c55e]" /> Saldo Disponível
           </div>
           <p className="text-3xl font-extrabold text-white mb-3">
-            {/* Agora ele usa o currentBalance lido direto do banco */}
             <AnimatedNumber value={stats.currentBalance} />
           </p>
           <div className="pt-3 border-t border-[#1a1a1a] flex justify-between text-sm">
@@ -176,7 +170,7 @@ export default function HomePage() {
       </Card>
 
       <Roulette onSpinComplete={() => {
-        // Delay de 1.5s garante que os dados já foram gravados no Firebase
+        // Delay de 1.5s para garantir que a transação foi registrada antes do refresh
         setTimeout(() => fetchHomeStats(user.id), 1500);
       }} />
     </div>
