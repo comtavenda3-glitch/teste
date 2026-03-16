@@ -5,45 +5,57 @@ import CheckIn from '../components/CheckIn';
 import Roulette from '../components/Roulette';
 import { TrendingUp, Users, Wallet } from 'lucide-react';
 
+import { db } from "../firebase/firebase"; 
+import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
+
 export default function HomePage() {
-  const { user, token } = useAuth();
-  const [stats, setStats] = useState({ todayEarnings: 0, newInvites: 0 });
+  const { user } = useAuth();
+  const [stats, setStats] = useState({ todayEarnings: 0, totalInvites: 0 });
   const [loading, setLoading] = useState(true);
 
-  // CORREÇÃO 1: O useEffect agora "espera" o token existir antes de fazer a busca
+  // Busca os dados assim que o ID do usuário estiver disponível
   useEffect(() => {
-    if (token) {
-      fetchStats();
+    if (user?.id) {
+      fetchStats(user.id);
     } else {
-      setLoading(false); // Se não tem token ainda, para de carregar para não travar a tela
+      setLoading(false);
     }
-  }, [token]); // A dependência [token] faz rodar de novo assim que o token carrega
+  }, [user?.id]);
 
-  const fetchStats = async () => {
+  const fetchStats = async (userId: string) => {
     try {
       setLoading(true);
-      const response = await fetch('/.netlify/functions/stats-today', {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+
+      // 1. Buscar Total de Convidados (Nível 1)
+      const qTeam = query(collection(db, 'users'), where('referredBy', '==', userId));
+      const teamSnap = await getDocs(qTeam);
+      const teamCount = teamSnap.size;
+
+      // 2. Buscar Ganhos de Hoje (Comissões recebidas a partir das 00:00 de hoje)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const startOfToday = Timestamp.fromDate(today);
+
+      const qEarnings = query(
+        collection(db, 'users', userId, 'transactions'),
+        where('type', '==', 'commission'),
+        where('createdAt', '>=', startOfToday)
+      );
+
+      const earningsSnap = await getDocs(qEarnings);
+      let todayTotal = 0;
+      earningsSnap.forEach(doc => {
+        todayTotal += Number(doc.data().amount || 0);
       });
 
-      // CORREÇÃO 2: Evita o erro "Unexpected token <" verificando se a resposta é realmente JSON
-      const contentType = response.headers.get("content-type");
-      if (response.ok && contentType && contentType.indexOf("application/json") !== -1) {
-        const data = await response.json();
-        setStats({
-          todayEarnings: data.todayEarnings || 0,
-          newInvites: data.newInvites || 0
-        });
-      } else {
-        console.error('Falha ao buscar estatísticas ou a rota não retornou JSON. Status:', response.status);
-        setStats({ todayEarnings: 0, newInvites: 0 });
-      }
+      setStats({
+        todayEarnings: todayTotal,
+        totalInvites: teamCount
+      });
+
     } catch (err) {
-      console.error('Error fetching stats:', err);
-      setStats({ todayEarnings: 0, newInvites: 0 });
+      console.error('Erro ao buscar estatísticas da Home:', err);
+      setStats({ todayEarnings: 0, totalInvites: 0 });
     } finally {
       setLoading(false);
     }
@@ -92,7 +104,7 @@ export default function HomePage() {
               </div>
               <span className="text-gray-400 text-sm">Convidados</span>
             </div>
-            <p className="text-2xl font-bold text-[#22c55e]">{stats.newInvites}</p>
+            <p className="text-2xl font-bold text-[#22c55e]">{stats.totalInvites}</p>
           </CardContent>
         </Card>
       </div>
@@ -111,7 +123,8 @@ export default function HomePage() {
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Total Ganhos</span>
               <span className="text-[#22c55e] font-semibold">
-                R$ {(Number(user?.totalEarned) || 0).toFixed(2)}
+                {/* Alterado de totalEarned para totalCommissions */}
+                R$ {(Number(user?.totalCommissions) || 0).toFixed(2)}
               </span>
             </div>
           </div>
@@ -122,13 +135,13 @@ export default function HomePage() {
       <Card className="bg-[#111111]/80 backdrop-blur-sm border-[#1a1a1a] animate-fade-in">
         <CardContent className="pt-6">
           <h3 className="text-white font-bold mb-4">Login Diário</h3>
-          <CheckIn onCheckInComplete={fetchStats} />
+          <CheckIn onCheckInComplete={() => user?.id && fetchStats(user.id)} />
         </CardContent>
       </Card>
 
       {/* Roulette */}
       <div className="animate-fade-in">
-        <Roulette onSpinComplete={fetchStats} />
+        <Roulette onSpinComplete={() => user?.id && fetchStats(user.id)} />
       </div>
     </div>
   );
